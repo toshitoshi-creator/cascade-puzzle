@@ -359,7 +359,7 @@
     </div>
   </div>
 
-  <div class="footer-msg">タイルをタップ→隣のタイルをタップ（またはドラッグ）で入れ替え</div>
+  <div class="footer-msg">タイルをフリックで隣と入れ替え／点線枠のタイル・ブロックはタップで消去</div>
 </div>
 
 <div class="gacha-modal" id="gachaModal">
@@ -3112,61 +3112,41 @@
     return {col,row};
   }
 
+  // Flick a tile to swap it with its neighbour in that direction. The swap
+  // fires as soon as the finger has travelled far enough, so fast or long
+  // flicks that end past the neighbouring cell still count. A tap (no real
+  // movement) on a block or a tier2+ tile clears it in one go.
+  const FLICK_MIN = 0.3; // fraction of a tile the finger must travel
+
   cvs.addEventListener('pointerdown', (e)=>{
     e.preventDefault();
     if(!running || busy) return;
     const cell = cellFromEvent(e);
     if(!cell) return;
-    dragStart = cell;
+    dragStart = {col:cell.col, row:cell.row, x:e.clientX, y:e.clientY, fired:false};
     try{ cvs.setPointerCapture(e.pointerId); }catch(err){}
+  });
+
+  cvs.addEventListener('pointermove', (e)=>{
+    if(!dragStart || dragStart.fired) return;
+    if(!running || busy){ dragStart = null; return; }
+    const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
+    if(Math.max(Math.abs(dx), Math.abs(dy)) < TILE*FLICK_MIN) return;
+    dragStart.fired = true;
+    const to = Math.abs(dx) > Math.abs(dy)
+      ? {col:dragStart.col + Math.sign(dx), row:dragStart.row}
+      : {col:dragStart.col, row:dragStart.row + Math.sign(dy)};
+    if(to.col<0||to.col>=COLS||to.row<0||to.row>=ROWS) return;
+    trySwap({col:dragStart.col, row:dragStart.row}, to);
   });
 
   cvs.addEventListener('pointerup', (e)=>{
     e.preventDefault();
-    if(!running || busy || !dragStart){ dragStart=null; return; }
     const start = dragStart;
     dragStart = null;
-    const endCell = cellFromEvent(e);
-    if(!endCell) return;
-
-    const sameCell = start.col===endCell.col && start.row===endCell.row;
-
-    if(!sameCell && isAdjacent(start,endCell)){
-      selected = null;
-      trySwap(start, endCell);
-      return;
-    }
-
-    if(sameCell){
-      const tile = board[endCell.col][endCell.row];
-
-      if(tile && tile.isBlock){
-        // Blocks can't be swapped, so there's no reason to make the player
-        // tap twice — one tap detonates immediately.
-        selected = null;
-        triggerTapClear(endCell.col, endCell.row);
-        return;
-      }
-
-      const alreadySelected = selected && selected.col===endCell.col && selected.row===endCell.row;
-
-      if(alreadySelected){
-        selected = null;
-        // Tapping the same tile twice: for tier3+ this confirms detonation.
-        // Doing it this way (rather than on the first tap) leaves the first
-        // tap free to select the tile for a normal swap-into-a-match.
-        if(tile && tile.tier >= 2) triggerTapClear(endCell.col, endCell.row);
-        return;
-      }
-      if(selected && isAdjacent(selected, endCell)){
-        const s = selected; selected = null;
-        trySwap(s, endCell);
-        return;
-      }
-      selected = endCell;
-    } else {
-      selected = endCell;
-    }
+    if(!start || start.fired || !running || busy) return;
+    const tile = board[start.col][start.row];
+    if(tile && (tile.isBlock || tile.tier >= 2)) triggerTapClear(start.col, start.row);
   });
 
   cvs.addEventListener('pointercancel', ()=>{ dragStart=null; });
