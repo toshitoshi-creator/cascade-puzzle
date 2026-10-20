@@ -129,10 +129,15 @@
     transition:transform 480ms cubic-bezier(.2,1.5,.35,1), opacity 260ms ease; }
   .gacha-card-wrap.pop{ transform:scale(1) rotate(0deg); opacity:1; }
   .gacha-rank{ font-family:'Orbitron',sans-serif; font-weight:900; font-size:16px; letter-spacing:3px; color:var(--gold); }
-  #gachaCanvas{ width:200px; height:260px; border-radius:16px; box-shadow:0 0 50px -6px currentColor, 0 20px 50px -10px rgba(0,0,0,0.8); }
+  #gachaCanvas{ width:min(240px,62vw); height:auto; aspect-ratio:240/312; border-radius:17px; box-shadow:0 0 50px -6px currentColor, 0 20px 50px -10px rgba(0,0,0,0.8); }
   .gacha-title{ font-family:'Orbitron',sans-serif; font-weight:700; font-size:18px; color:#fff; text-align:center; max-width:260px; }
   .gacha-no{ font-family:'Orbitron',sans-serif; font-size:14px; color:rgba(255,255,255,0.7); letter-spacing:1px; }
   .gacha-stars{ font-size:17px; letter-spacing:3px; color:var(--gold); }
+  /* rank, name, No. and stars are printed on the card itself */
+  .gacha-card-wrap .gacha-rank, .gacha-card-wrap .gacha-title, .gacha-card-wrap .gacha-no, .gacha-card-wrap .gacha-stars{ display:none; }
+  .gacha-card-wrap.foil canvas{ animation:cardFoil 2.4s ease-in-out infinite; }
+  @keyframes cardFoil{ 0%,100%{ filter:brightness(1) saturate(1); } 50%{ filter:brightness(1.12) saturate(1.25); } }
+  @media (prefers-reduced-motion: reduce){ .gacha-card-wrap.foil canvas{ animation:none; } }
   .gacha-hint{ font-size:14px; color:rgba(255,255,255,0.7); letter-spacing:2px; }
   .gacha-skip-row{ display:none; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; max-width:280px; }
   .gacha-skip-row.show{ display:flex; }
@@ -151,7 +156,7 @@
     transform:scale(0.3) rotate(-8deg); opacity:0;
     transition:transform 420ms cubic-bezier(.2,1.6,.35,1), opacity 240ms ease; }
   .item-obtain-wrap.pop{ transform:scale(1) rotate(0deg); opacity:1; }
-  #obtainCanvas{ width:200px; height:260px; border-radius:16px; box-shadow:0 0 50px -6px currentColor, 0 20px 50px -10px rgba(0,0,0,0.8); }
+  #obtainCanvas{ width:min(240px,62vw); height:auto; aspect-ratio:240/312; border-radius:17px; box-shadow:0 0 50px -6px currentColor, 0 20px 50px -10px rgba(0,0,0,0.8); }
   .obtain-front-info{ display:flex; flex-direction:column; align-items:center; gap:6px; }
   .obtain-buttons{ display:flex; gap:10px; }
   .btn-icon{ width:20px; height:20px; border-radius:50%; vertical-align:-5px; margin-right:6px; object-fit:cover; }
@@ -852,7 +857,8 @@
   }
 
   // ---------- card art: swap in real illustrations later ----------
-  // To use prepared images instead of the generated art, put image files in
+  // To use prepared illustrations instead of the generated gem art (they fill
+  // the card's art window; frame, rank and name are still drawn), put image files in
   // a folder named by CARD_IMAGE_DIR, placed next to this HTML file, using
   // this naming pattern: t{tier}_{no}.png  (e.g. "cards/t2_137.png" for
   // tier 2, card No.137 — see cardImagePath() below for the exact pattern).
@@ -887,119 +893,337 @@
     return null;
   }
 
-  function drawCard(g, w, h, tier, seed, no, onReady){
-    if(no != null){
-      const img = getCardImageIfReady(tier, no, onReady);
-      if(img){
-        g.clearRect(0,0,w,h);
-        g.drawImage(img, 0, 0, w, h);
-        return;
+  // ---------- card design ----------
+  // Every card shares one layout — metal frame, rank badge + stars header,
+  // art window, name plate — and each rarity gets its own frame metal,
+  // background pattern and ornaments, so the rank reads at a glance.
+  const CARD_STYLE = {
+    2:{ metal:['#f4f7fc','#8a96ad','#e8eef8','#5f6a82'], bg:['#2b3d7a','#0e1638'], pattern:'dots',   plate:'#141c3e' },
+    3:{ metal:['#fff3c4','#b8860b','#ffe08a','#7a4f00'], bg:['#8a5c14','#2a1a04'], pattern:'rays',   plate:'#2e1e05' },
+    4:{ metal:['#e9fdff','#26a9c7','#bff6ff','#08566a'], bg:['#11667c','#041c26'], pattern:'hex',    plate:'#05232e' },
+    5:{ metal:'holo',                                     bg:['#7a1a8c','#1c0424'], pattern:'prism',  plate:'#210527' },
+    6:{ metal:['#ffe6b8','#d0301e','#ffb26a','#5a0804'], bg:['#a0200c','#240503'], pattern:'flame',  plate:'#2a0603' },
+    7:{ metal:'rainbow',                                  bg:['#4a2a8a','#0c0420'], pattern:'aurora', plate:'#120628' },
+  };
+
+  function cardPath(g, x, y, w, h, r){
+    g.beginPath();
+    g.moveTo(x+r, y);
+    g.arcTo(x+w, y, x+w, y+h, r);
+    g.arcTo(x+w, y+h, x, y+h, r);
+    g.arcTo(x, y+h, x, y, r);
+    g.arcTo(x, y, x+w, y, r);
+    g.closePath();
+  }
+
+  function frameFill(g, w, h, tier, seed){
+    const st = CARD_STYLE[tier];
+    const grad = g.createLinearGradient(0, 0, w, h);
+    if(st.metal === 'holo'){
+      ['#ffd6f6','#ff4de8','#b8f3ff','#8a3cff','#ffe3a8','#ff4de8'].forEach((c,i,a)=>grad.addColorStop(i/(a.length-1), c));
+    } else if(st.metal === 'rainbow'){
+      const base = seed % 360;
+      for(let i=0;i<=6;i++) grad.addColorStop(i/6, `hsl(${(base+i*60)%360},90%,${i%2?62:78}%)`);
+    } else {
+      st.metal.forEach((c,i,a)=>grad.addColorStop(i/(a.length-1), c));
+    }
+    return grad;
+  }
+
+  // Faint repeating motif behind the gem, one per rarity.
+  function drawPattern(g, x, y, w, h, tier, rand){
+    const tc = TIER_COLOR[tier];
+    const cx = x+w/2, cy = y+h*0.48;
+    g.save();
+    switch(CARD_STYLE[tier].pattern){
+      case 'dots':
+        g.fillStyle = colA('#ffffff', 0.10);
+        for(let yy=y+6; yy<y+h; yy+=10) for(let xx=x+6+((yy/10)%2)*5; xx<x+w; xx+=10){
+          g.beginPath(); g.arc(xx, yy, 1.1, 0, Math.PI*2); g.fill();
+        }
+        break;
+      case 'rays': {
+        const n = 18, off = rand()*Math.PI;
+        g.fillStyle = colA('#ffe9a8', 0.13);
+        for(let i=0;i<n;i++){
+          const a = off + i*Math.PI*2/n;
+          g.beginPath(); g.moveTo(cx, cy);
+          g.arc(cx, cy, h, a, a+Math.PI/n*0.9); g.closePath(); g.fill();
+        }
+        break;
+      }
+      case 'hex': {
+        const s = 11;
+        g.strokeStyle = colA(tc, 0.22); g.lineWidth = 1;
+        for(let row=0; row*s*1.5 < h+s; row++){
+          for(let col=0; col*s*1.732 < w+s; col++){
+            const hx = x + col*s*1.732 + (row%2)*s*0.866, hy = y + row*s*1.5;
+            g.beginPath();
+            for(let k=0;k<6;k++){ const a=Math.PI/3*k+Math.PI/6; g.lineTo(hx+Math.cos(a)*s*0.95, hy+Math.sin(a)*s*0.95); }
+            g.closePath(); g.stroke();
+          }
+        }
+        break;
+      }
+      case 'prism': {
+        g.globalCompositeOperation = 'lighter';
+        for(let i=0;i<7;i++){
+          const lx = x + rand()*w, lw = w*(0.08+rand()*0.18);
+          const grad = g.createLinearGradient(lx, y, lx+lw, y+h);
+          grad.addColorStop(0, 'rgba(255,255,255,0)');
+          grad.addColorStop(0.5, `hsla(${Math.floor(rand()*360)},100%,70%,0.16)`);
+          grad.addColorStop(1, 'rgba(255,255,255,0)');
+          g.fillStyle = grad;
+          g.beginPath(); g.moveTo(lx, y); g.lineTo(lx+lw, y); g.lineTo(lx+lw-w*0.5, y+h); g.lineTo(lx-w*0.5, y+h); g.closePath(); g.fill();
+        }
+        break;
+      }
+      case 'flame': {
+        for(let i=0;i<9;i++){
+          const fx0 = x + (i+0.5)*w/9 + (rand()-0.5)*8, fh = h*(0.35+rand()*0.35);
+          const grad = g.createLinearGradient(0, y+h, 0, y+h-fh);
+          grad.addColorStop(0, 'rgba(255,170,60,0.38)');
+          grad.addColorStop(1, 'rgba(255,60,30,0)');
+          g.fillStyle = grad;
+          g.beginPath(); g.moveTo(fx0-w*0.09, y+h);
+          g.quadraticCurveTo(fx0-w*0.06, y+h-fh*0.6, fx0, y+h-fh);
+          g.quadraticCurveTo(fx0+w*0.06, y+h-fh*0.6, fx0+w*0.09, y+h);
+          g.closePath(); g.fill();
+        }
+        break;
+      }
+      case 'aurora': {
+        g.globalCompositeOperation = 'lighter';
+        for(let i=0;i<4;i++){
+          const by = y + h*(0.15+i*0.2), hue = (rand()*360)|0;
+          g.strokeStyle = `hsla(${hue},100%,65%,0.22)`; g.lineWidth = h*0.07;
+          g.beginPath(); g.moveTo(x-10, by);
+          g.bezierCurveTo(x+w*0.3, by-h*0.15, x+w*0.7, by+h*0.15, x+w+10, by-h*0.05);
+          g.stroke();
+        }
+        break;
       }
     }
-    const rand = mulberry32(seed);
-    g.clearRect(0,0,w,h);
-    const pal = CARD_PALETTE[tier];
-    const bg = g.createRadialGradient(w*0.5,h*0.32,10,w*0.5,h*0.5,h*0.8);
-    if(tier===7){
-      const hue = 40 + (seed%20); // narrow gold/champagne band, not a random full-spectrum hue
-      bg.addColorStop(0, `hsl(${hue},70%,55%)`);
-      bg.addColorStop(1, `hsl(258,45%,16%)`);
-    } else {
-      bg.addColorStop(0, pal[1]);
-      bg.addColorStop(1, pal[0]);
-    }
-    g.fillStyle = bg;
-    g.fillRect(0,0,w,h);
+    g.restore();
+  }
 
-    const cx = w/2, cy = h*0.4;
-    const petals = 5 + tier + Math.floor(rand()*3);
-    for(let i=0;i<petals;i++){
-      const ang = (Math.PI*2/petals)*i + rand()*0.3;
-      const len = h*0.3*(0.7+rand()*0.5);
-      g.save();
-      g.translate(cx,cy);
-      g.rotate(ang);
-      const tc = tier===7 ? `hsl(${40+((seed+i*13)%25)},75%,72%)` : TIER_COLOR[tier];
-      const grad = g.createLinearGradient(0,0,0,-len);
-      grad.addColorStop(0, colA(tc,0.03));
-      grad.addColorStop(1, colA(tc,0.85));
-      g.fillStyle = grad;
-      g.beginPath();
-      g.moveTo(0,0);
-      g.quadraticCurveTo(len*0.2,-len*0.55, 0,-len);
-      g.quadraticCurveTo(-len*0.2,-len*0.55, 0,0);
-      g.fill();
-      g.restore();
-    }
-
-    const sparkles = 10+tier*6;
-    for(let i=0;i<sparkles;i++){
-      const x=rand()*w, y=rand()*h, r=0.6+rand()*1.8;
-      g.globalAlpha = 0.25+rand()*0.55;
-      g.fillStyle = '#fff';
-      g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill();
-    }
-    g.globalAlpha = 1;
+  // Faceted crystal: an n-sided outer outline, an inner table, and
+  // alternating light/dark facets between them. Shape and tilt come from the seed.
+  function drawGem(g, cx, cy, r, tier, seed, rand){
+    const sides = 5 + Math.floor(rand()*4) + (tier>=5 ? 1 : 0);
+    const rot = -Math.PI/2 + (rand()-0.5)*0.5;
+    const stretch = 1 + rand()*0.25;
+    const base = tier===7 ? `hsl(${seed%360},90%,65%)` : TIER_COLOR[tier];
+    const pt = (k, rr)=>{ const a = rot + k*Math.PI*2/sides; return [cx+Math.cos(a)*rr, cy+Math.sin(a)*rr*stretch]; };
 
     g.save();
-    g.translate(cx,cy);
-    const coreR = h*0.1;
-    const coreTc = tier===7 ? `hsl(${42+(seed%16)},80%,78%)` : TIER_COLOR[tier];
-    const coreGrad = g.createRadialGradient(0,-coreR*0.3,1,0,0,coreR);
-    coreGrad.addColorStop(0,'#fff');
-    coreGrad.addColorStop(0.45, coreTc);
-    coreGrad.addColorStop(1, colA(coreTc,0.1));
-    g.fillStyle = coreGrad;
-    g.beginPath(); g.arc(0,0,coreR,0,Math.PI*2); g.fill();
+    const glow = g.createRadialGradient(cx, cy, r*0.2, cx, cy, r*2.1);
+    glow.addColorStop(0, colA(tier===7?'#ffffff':TIER_COLOR[tier], 0.55));
+    glow.addColorStop(1, colA(tier===7?'#ffffff':TIER_COLOR[tier], 0));
+    g.fillStyle = glow;
+    g.fillRect(cx-r*2.2, cy-r*2.2, r*4.4, r*4.4);
+
+    for(let k=0;k<sides;k++){
+      const [ax, ay] = pt(k, r), [bx, by] = pt(k+1, r);
+      const [ix, iy] = pt(k, r*0.5), [jx, jy] = pt(k+1, r*0.5);
+      const hue = tier===7 ? `hsl(${(seed + k*360/sides)%360},90%,${60+(k%2)*14}%)` : base;
+      g.fillStyle = hue;
+      g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.lineTo(jx, jy); g.lineTo(ix, iy); g.closePath(); g.fill();
+      const shade = (Math.cos(rot + (k+0.5)*Math.PI*2/sides + 2.3) + 1) / 2; // light from upper-left
+      g.fillStyle = shade > 0.5 ? `rgba(255,255,255,${(shade-0.5)*0.9})` : `rgba(0,0,0,${(0.5-shade)*0.8})`;
+      g.fill();
+    }
+    g.beginPath();
+    for(let k=0;k<sides;k++){ const [ix, iy] = pt(k, r*0.5); k ? g.lineTo(ix, iy) : g.moveTo(ix, iy); }
+    g.closePath();
+    const table = g.createLinearGradient(cx-r*0.5, cy-r*0.5, cx+r*0.5, cy+r*0.5);
+    table.addColorStop(0, '#ffffff');
+    table.addColorStop(1, base);
+    g.fillStyle = table; g.fill();
+
+    g.strokeStyle = 'rgba(255,255,255,0.75)'; g.lineWidth = Math.max(1, r*0.035); g.lineJoin = 'round';
+    g.beginPath();
+    for(let k=0;k<sides;k++){
+      const [ax, ay] = pt(k, r), [ix, iy] = pt(k, r*0.5);
+      g.moveTo(ax, ay); g.lineTo(ix, iy);
+    }
+    g.stroke();
+    g.beginPath();
+    for(let k=0;k<=sides;k++){ const [ax, ay] = pt(k, r); k ? g.lineTo(ax, ay) : g.moveTo(ax, ay); }
+    g.stroke();
+
+    // specular glint
+    g.fillStyle = '#fff';
+    g.translate(cx - r*0.28, cy - r*0.32);
+    g.rotate(Math.PI/4);
+    g.beginPath(); g.ellipse(0, 0, r*0.16, r*0.05, 0, 0, Math.PI*2); g.fill();
     g.restore();
+  }
 
-    const grad2 = g.createLinearGradient(0,h*0.72,0,h);
-    grad2.addColorStop(0,'rgba(0,0,0,0)');
-    grad2.addColorStop(1,'rgba(0,0,0,0.55)');
-    g.fillStyle = grad2;
-    g.fillRect(0,h*0.72,w,h*0.28);
+  function drawSparkle(g, x, y, s, alpha){
+    g.save();
+    g.globalAlpha = alpha;
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.moveTo(x, y-s); g.quadraticCurveTo(x, y, x+s, y);
+    g.quadraticCurveTo(x, y, x, y+s); g.quadraticCurveTo(x, y, x-s, y);
+    g.quadraticCurveTo(x, y, x, y-s); g.fill();
+    g.restore();
+  }
 
-    g.strokeStyle = tier===7 ? '#fff' : TIER_COLOR[tier];
-    g.lineWidth = Math.max(2, w*0.015);
-    g.strokeRect(g.lineWidth, g.lineWidth, w-g.lineWidth*2, h-g.lineWidth*2);
+  function fitText(g, text, maxW, size, weight, family){
+    let s = size;
+    do { g.font = `${weight} ${s}px ${family}`; } while(g.measureText(text).width > maxW && --s > 7);
+    return s;
+  }
+
+  // Small diamond studs on the frame corners (SR and above).
+  function drawCornerStuds(g, w, h, inset, tier){
+    const s = w*0.035;
+    [[inset, inset],[w-inset, inset],[inset, h-inset],[w-inset, h-inset]].forEach(([x,y])=>{
+      g.save();
+      g.translate(x, y); g.rotate(Math.PI/4);
+      g.fillStyle = tier===7 ? '#ffffff' : TIER_COLOR[tier];
+      g.shadowColor = g.fillStyle; g.shadowBlur = s*2;
+      g.fillRect(-s/2, -s/2, s, s);
+      g.shadowBlur = 0;
+      g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1;
+      g.strokeRect(-s/2, -s/2, s, s);
+      g.restore();
+    });
+  }
+
+  function drawCard(g, w, h, tier, seed, no, onReady){
+    const rand = mulberry32(seed);
+    const st = CARD_STYLE[tier];
+    const compact = w < 150; // gallery thumbnails: drop the small print
+    const R = w*0.07, B = w*0.045;
+    g.clearRect(0,0,w,h);
+
+    // frame
+    cardPath(g, 0, 0, w, h, R);
+    g.fillStyle = frameFill(g, w, h, tier, seed);
+    g.fill();
+    cardPath(g, B*0.45, B*0.45, w-B*0.9, h-B*0.9, R*0.85);
+    g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 1; g.stroke();
+
+    // inner body
+    const ix = B, iy = B, iw = w-B*2, ih = h-B*2;
+    cardPath(g, ix, iy, iw, ih, R*0.7);
+    g.fillStyle = st.plate; g.fill();
+
+    // art window
+    const headH = h*0.11;
+    const ax = ix + w*0.03, ay = iy + headH, aw = iw - w*0.06;
+    const ah = compact ? ih - headH - w*0.05 : ih - headH - h*0.2;
+    g.save();
+    cardPath(g, ax, ay, aw, ah, R*0.45);
+    g.clip();
+    const img = no != null ? getCardImageIfReady(tier, no, onReady) : null;
+    if(img){
+      const sc = Math.max(aw/img.width, ah/img.height);
+      g.drawImage(img, ax+(aw-img.width*sc)/2, ay+(ah-img.height*sc)/2, img.width*sc, img.height*sc);
+    } else {
+      const bg = g.createRadialGradient(ax+aw/2, ay+ah*0.45, 4, ax+aw/2, ay+ah*0.5, ah*0.85);
+      bg.addColorStop(0, st.bg[0]); bg.addColorStop(1, st.bg[1]);
+      g.fillStyle = bg; g.fillRect(ax, ay, aw, ah);
+      drawPattern(g, ax, ay, aw, ah, tier, rand);
+      drawGem(g, ax+aw/2, ay+ah*0.5, Math.min(aw, ah)*0.27, tier, seed, rand);
+      const sparkles = 3 + tier*2;
+      for(let i=0;i<sparkles;i++) drawSparkle(g, ax+rand()*aw, ay+rand()*ah, 1.5+rand()*w*0.02, 0.35+rand()*0.6);
+    }
+    g.restore();
+    cardPath(g, ax, ay, aw, ah, R*0.45);
+    g.strokeStyle = frameFill(g, w, h, tier, seed); g.lineWidth = Math.max(1.5, w*0.012); g.stroke();
+
+    // header: rank badge + stars
+    const rank = RANK[tier];
+    const by = iy + headH*0.5;
+    const badgeS = fitText(g, rank, w*0.3, Math.floor(headH*0.62), 900, 'Orbitron, sans-serif');
+    const bw = g.measureText(rank).width + headH*0.5, bh = headH*0.72;
+    cardPath(g, ax, by-bh/2, bw, bh, bh*0.3);
+    g.fillStyle = frameFill(g, w, h, tier, seed); g.fill();
+    g.fillStyle = st.plate; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `900 ${badgeS}px Orbitron, sans-serif`;
+    g.fillText(rank, ax+bw/2, by+1);
+    const stars = tier - 1;
+    g.font = `${Math.floor(headH*(compact?0.5:0.48))}px sans-serif`;
+    g.textAlign = 'right';
+    g.fillStyle = '#ffd35a';
+    g.shadowColor = 'rgba(255,200,80,0.8)'; g.shadowBlur = 4;
+    g.fillText('★'.repeat(stars), ax+aw, by+1);
+    g.shadowBlur = 0;
+
+    // name plate
+    if(!compact && no != null){
+      const py = ay + ah + (ih - headH - ah)*0.5 + iy*0.25;
+      const title = cardTitleFor(tier, no);
+      fitText(g, title, aw*0.94, Math.floor(h*0.068), 900, "'Zen Kaku Gothic New', sans-serif");
+      g.textAlign = 'center'; g.fillStyle = '#fff';
+      g.fillText(title, w/2, py - h*0.025);
+      g.font = `700 ${Math.floor(h*0.038)}px Orbitron, sans-serif`;
+      g.fillStyle = colA(tier===7 ? '#ffffff' : TIER_COLOR[tier], 0.9);
+      g.fillText(`No.${String(no).padStart(4,'0')} / ${TIER_COUNT[tier]}`, w/2, py + h*0.04);
+    }
+
+    if(tier >= 4) drawCornerStuds(g, w, h, R*0.55, tier);
+
+    // foil sheen for SSR and above
+    if(tier >= 5){
+      g.save();
+      cardPath(g, 0, 0, w, h, R); g.clip();
+      g.globalCompositeOperation = 'overlay';
+      const sh = g.createLinearGradient(0, 0, w, h);
+      sh.addColorStop(0.25, 'rgba(255,255,255,0)');
+      sh.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+      sh.addColorStop(0.55, 'rgba(255,255,255,0)');
+      g.fillStyle = sh; g.fillRect(0, 0, w, h);
+      g.restore();
+    }
   }
 
   function drawCardBack(g, w, h, tier){
+    const st = CARD_STYLE[tier];
+    const tc = tier===7 ? '#ffffff' : TIER_COLOR[tier];
+    const R = w*0.07, B = w*0.045;
     g.clearRect(0,0,w,h);
-    const tc = TIER_COLOR[tier];
-    const bg = g.createLinearGradient(0,0,w,h);
-    bg.addColorStop(0,'#12142c');
-    bg.addColorStop(1,'#05060f');
-    g.fillStyle = bg;
-    g.fillRect(0,0,w,h);
+    cardPath(g, 0, 0, w, h, R);
+    g.fillStyle = frameFill(g, w, h, tier, 0); g.fill();
 
+    const ix = B, iy = B, iw = w-B*2, ih = h-B*2;
     g.save();
-    g.beginPath();
-    g.rect(0,0,w,h);
-    g.clip();
-    g.strokeStyle = colA(tc,0.35);
-    g.lineWidth = 1.4;
-    const step = 22;
-    for(let x=-h;x<w+h;x+=step){
-      g.beginPath(); g.moveTo(x,0); g.lineTo(x+h,h); g.stroke();
-      g.beginPath(); g.moveTo(x,h); g.lineTo(x+h,0); g.stroke();
+    cardPath(g, ix, iy, iw, ih, R*0.7); g.clip();
+    const bg = g.createRadialGradient(w/2, h/2, 4, w/2, h/2, h*0.7);
+    bg.addColorStop(0, st.bg[0]); bg.addColorStop(1, '#05060f');
+    g.fillStyle = bg; g.fillRect(ix, iy, iw, ih);
+    // lattice
+    g.strokeStyle = colA(tc, 0.18); g.lineWidth = 1;
+    const step = w*0.09;
+    for(let x=-h; x<w+h; x+=step){
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x+h, h); g.stroke();
+      g.beginPath(); g.moveTo(x, h); g.lineTo(x+h, 0); g.stroke();
     }
+    // concentric rings
+    g.strokeStyle = colA(tc, 0.45);
+    [0.42, 0.34].forEach(f=>{ g.beginPath(); g.arc(w/2, h/2, w*f, 0, Math.PI*2); g.stroke(); });
     g.restore();
 
-    g.save();
-    g.translate(w/2,h/2);
-    g.shadowColor = tc; g.shadowBlur = 24;
-    g.strokeStyle = tc; g.lineWidth = 3;
-    g.beginPath(); g.arc(0,0,w*0.22,0,Math.PI*2); g.stroke();
-    g.shadowBlur = 0;
-    g.font = `900 ${Math.floor(w*0.24)}px Orbitron, sans-serif`;
-    g.fillStyle = tc; g.textAlign='center'; g.textBaseline='middle';
-    g.fillText('?', 0, 4);
-    g.restore();
+    drawGem(g, w/2, h/2, w*0.17, tier, 7, mulberry32(tier*97));
+    g.font = `900 ${Math.floor(w*0.2)}px Orbitron, sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.6)';
+    g.strokeText('?', w/2, h/2 + 2);
+    g.fillStyle = '#fff';
+    g.fillText('?', w/2, h/2 + 2);
 
-    g.strokeStyle = tc;
-    g.lineWidth = Math.max(2, w*0.015);
-    g.strokeRect(g.lineWidth, g.lineWidth, w-g.lineWidth*2, h-g.lineWidth*2);
+    g.font = `700 ${Math.floor(w*0.05)}px Orbitron, sans-serif`;
+    g.fillStyle = colA(tc, 0.85);
+    g.fillText('CASCADE CRYSTALS', w/2, iy + ih*0.08);
+    g.fillText(RANK[tier], w/2, iy + ih*0.93);
+
+    cardPath(g, ix, iy, iw, ih, R*0.7);
+    g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = 1; g.stroke();
+    drawCornerStuds(g, w, h, R*0.55, tier);
   }
 
   function pullGacha(tier){
@@ -1100,7 +1324,7 @@
   function showGachaReveal(card, remainingCount){
     return new Promise(resolve=>{
       sfxReveal();
-      const GW = 200, GH = 260, gdpr = Math.min(window.devicePixelRatio||1,2);
+      const GW = 240, GH = 312, gdpr = Math.min(window.devicePixelRatio||1,2);
       gachaCanvas.width = GW*gdpr; gachaCanvas.height = GH*gdpr;
       gctx.setTransform(gdpr,0,0,gdpr,0,0);
       drawCard(gctx, GW, GH, card.tier, card.seed, card.no, ()=>drawCard(gctx, GW, GH, card.tier, card.seed, card.no));
@@ -1110,6 +1334,7 @@
       document.getElementById('gachaNo').textContent = `No.${String(card.no).padStart(4,'0')} / ${TIER_COUNT[card.tier]}`;
       document.getElementById('gachaStars').textContent = '★'.repeat(card.stars) + '☆'.repeat(6-card.stars);
       gachaCardWrap.style.color = TIER_COLOR[card.tier];
+      gachaCardWrap.classList.toggle('foil', card.tier >= 5);
       gachaModal.classList.add('show');
       gachaCardWrap.classList.remove('pop');
       void gachaCardWrap.offsetWidth;
@@ -1154,13 +1379,14 @@
 
   function promptObtain(card){
     return new Promise(resolve=>{
-      const W = 200, H = 260, dpr = Math.min(window.devicePixelRatio||1,2);
+      const W = 240, H = 312, dpr = Math.min(window.devicePixelRatio||1,2);
       obtainCanvas.width = W*dpr; obtainCanvas.height = H*dpr;
       obtainCtx.setTransform(dpr,0,0,dpr,0,0);
       drawCardBack(obtainCtx, W, H, card.tier);
 
       obtainMessage.textContent = `${card.rank}のプレミアムカードを取得しました。`;
       obtainCardWrap.style.color = TIER_COLOR[card.tier];
+      obtainCardWrap.classList.toggle('foil', card.tier >= 5);
       obtainFrontInfo.style.display = 'none';
       obtainHint.style.display = 'none';
       obtainButtons.style.display = 'flex';
